@@ -7,7 +7,7 @@ SerialVersion: 1
 MinPlatformVersion: 15
 ProOnly: False
 Author: ngit-tm
-ShortDescription: This extension allows users to customize their Burp Suite window title, hide or show the license suffix, and reset it back to the default title.
+ShortDescription: Customize your Burp Suite window title.
 EntryPoint: target_repo.jar
 BuildCommand: ./gradlew clean build
 SupportedProducts: Pro, Community
