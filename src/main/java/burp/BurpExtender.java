@@ -3,6 +3,7 @@ package burp;
 import burp.api.montoya.BurpExtension;
 import burp.api.montoya.MontoyaApi;
 import javax.swing.*;
+import java.awt.*;
 import java.util.regex.Pattern;
 
 public class BurpExtender implements BurpExtension {
@@ -17,14 +18,10 @@ public class BurpExtender implements BurpExtension {
     // Regex pattern to match " - licensed to ..."
     private static final Pattern LICENSED_TO_PATTERN =
             Pattern.compile("\\s-\\slicensed\\sto\\s.*", Pattern.CASE_INSENSITIVE);
+    private static final int MAX_TITLE_LENGTH = 120;
 
     // Menu item to display current title (read-only)
     private JMenuItem currentItem;
-    // Prevent duplicate "Title" menus on reload/unload
-    private JMenu titleMenu;
-    private static final String MENU_ID = "bwtc-title-menu";
-
-
     @Override
     public void initialize(MontoyaApi api) {
         this.api = api;
@@ -39,10 +36,9 @@ public class BurpExtender implements BurpExtension {
         applyTitle(true);
         updateCurrentMenuItem();
 
-        // On unload, restore the original title and remove our menu to avoid leftover UI artifacts
+        // On unload, restore the original title
         api.extension().registerUnloadingHandler(() -> {
             safeSetTitle(originalTitle);
-            removeMenuIfPresent();
         });
 
         // logging
@@ -53,15 +49,7 @@ public class BurpExtender implements BurpExtension {
     // Add Title menu
     // Remove an existing instance (if any) before adding a fresh one
     private void addTitleMenu(){
-        JMenuBar bar = burpFrame.getJMenuBar();
-        if(bar == null){
-            api.logging().logToError("Error: MenuBar not found.");
-            return;
-        }
-        removeMenuIfPresent();
-
-        this.titleMenu = new JMenu("Title");
-        this.titleMenu.setName(MENU_ID);
+        JMenu titleMenu = new JMenu("Title");
 
         // Current window title (read only item)
         currentItem = new JMenuItem();
@@ -87,25 +75,59 @@ public class BurpExtender implements BurpExtension {
         setCustom.addActionListener(e -> {
             // Initial value: use customTitle if set, else current title
             String initial = (customTitle != null) ? customTitle : burpFrame.getTitle();
-            String input = (String) JOptionPane.showInputDialog(
-                    burpFrame,
-                    "Enter window title:",
-                    "Set Custom Title",
-                    JOptionPane.PLAIN_MESSAGE,
-                    null,
-                    null,
-                    initial
-            );
-            if (input != null) {
-                input = input.trim();
-                if (input.isEmpty()) {
-                    JOptionPane.showMessageDialog(burpFrame, "Title cannot be empty.");
-                    return;
+            JTextField field = new JTextField(initial, 40);
+            Dimension pref = field.getPreferredSize();
+            field.setPreferredSize(new Dimension(480, pref.height));
+            JLabel info = new JLabel("Enter window title (max " + MAX_TITLE_LENGTH + " characters).");
+
+            JPanel content = new JPanel(new BorderLayout(0, 8));
+            content.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
+            content.add(info, BorderLayout.NORTH);
+            content.add(field, BorderLayout.CENTER);
+
+            JPanel buttonsPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+            JButton okButton = new JButton("OK");
+            JButton cancelButton = new JButton("Cancel");
+            buttonsPanel.add(cancelButton);
+            buttonsPanel.add(okButton);
+            content.add(buttonsPanel, BorderLayout.SOUTH);
+
+            final boolean[] accepted = {false};
+            JDialog dialog = new JDialog(burpFrame, "Set Custom Title", true);
+            okButton.addActionListener(evt -> {
+                accepted[0] = true;
+                dialog.dispose();
+            });
+            cancelButton.addActionListener(evt -> dialog.dispose());
+
+            dialog.setContentPane(content);
+            dialog.pack();
+            dialog.setLocationRelativeTo(burpFrame);
+            dialog.getRootPane().setDefaultButton(okButton);
+            SwingUtilities.invokeLater(field::requestFocusInWindow);
+            dialog.setVisible(true);
+
+            if (accepted[0]) {
+                String input = field.getText();
+                if (input != null) {
+                    input = input.trim();
+                    if (input.isEmpty()) {
+                        JOptionPane.showMessageDialog(burpFrame, "Title cannot be empty.");
+                        return;
+                    }
+                    int length = input.codePointCount(0, input.length());
+                    if (length > MAX_TITLE_LENGTH) {
+                        JOptionPane.showMessageDialog(
+                                burpFrame,
+                                "Title must be " + MAX_TITLE_LENGTH + " characters or fewer."
+                        );
+                        return;
+                    }
+                    customTitle = input;
+                    applyTitle(true);
+                    updateCurrentMenuItem();
+                    api.logging().logToOutput("Custom title = " + customTitle);
                 }
-                customTitle = input;
-                applyTitle(true);
-                updateCurrentMenuItem();
-                api.logging().logToOutput("Custom title = " + customTitle);
             }
         });
         titleMenu.add(setCustom);
@@ -120,9 +142,9 @@ public class BurpExtender implements BurpExtension {
         });
         titleMenu.add(reset);
 
-        bar.add(titleMenu);
-        bar.revalidate();
-        bar.repaint();
+        if (api.userInterface().menuBar().registerMenu(titleMenu) == null) {
+            api.logging().logToError("Failed to register Title menu via Montoya API.");
+        }
     }
 
     // Update "Current: ..." menu item to reflect current title
@@ -159,23 +181,4 @@ public class BurpExtender implements BurpExtension {
         }
     }
 
-    // Find and remove our menu by MENU_ID.
-    private void removeMenuIfPresent() {
-    Runnable r = () -> {
-        JMenuBar bar = burpFrame.getJMenuBar();
-        if (bar == null) return;
-        for (int i = 0; i < bar.getMenuCount(); i++) {
-            JMenu m = bar.getMenu(i);
-            if (m != null && MENU_ID.equals(m.getName())) {
-                bar.remove(i);
-                bar.revalidate();
-                bar.repaint();
-                api.logging().logToOutput("Removed existing Title menu.");
-                break;
-            }
-        }
-    };
-    if (SwingUtilities.isEventDispatchThread()) r.run();
-    else SwingUtilities.invokeLater(r);
-    }
 }
